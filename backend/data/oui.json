@@ -1,0 +1,18 @@
+{
+  "00:11:22": "Intel",
+  "24:0A:C4": "Espressif",
+  "28:CD:C1": "Espressif",
+  "2C:F4:32": "Espressif",
+  "3C:61:05": "Apple",
+  "40:4E:36": "Apple",
+  "48:D7:05": "Apple",
+  "58:CB:52": "Google",
+  "84:C5:A6": "Samsung",
+  "88:32:9B": "Samsung",
+  "98:52:B1": "Samsung",
+  "B8:27:EB": "Raspberry Pi",
+  "D8:3A:DD": "Google",
+  "DC:A6:32": "Raspberry Pi",
+  "E4:5F:01": "Raspberry Pi",
+  "F4:F5:D8": "Intel"
+}

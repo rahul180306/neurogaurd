@@ -54,12 +54,23 @@ def scan_network():
 
 def block_ip(ip_address: str):
     """
-    Simulates firewall IP blocking mechanism and logs the autonomous action to MongoDB.
+    Executes actual iptables firewall IP blocking mechanism and logs the autonomous action to MongoDB.
     """
     print(f"Executing Firewall Rule: BLOCK {ip_address}")
     
+    # Actually block the IP using iptables
+    try:
+        subprocess.run(["iptables", "-A", "INPUT", "-s", ip_address, "-j", "DROP"], check=True)
+        subprocess.run(["iptables", "-A", "FORWARD", "-s", ip_address, "-j", "DROP"], check=True)
+        print(f"✅ Successfully added iptables DROP rules for {ip_address}")
+    except Exception as e:
+        print(f"❌ Failed to execute iptables for {ip_address}: {e}")
+
     if sync_db is not None:
         timestamp = datetime.utcnow().isoformat()
+        
+        
+        
         
         # Log to blocked IPs
         sync_db.blocked_ips.insert_one({

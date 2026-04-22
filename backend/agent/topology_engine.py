@@ -27,17 +27,33 @@ DEVICE_TYPE_COLORS = {
     "phone": {"bg": "bg-pink-500/20", "border": "border-pink-400/40", "text": "text-pink-300", "fill": "#EC4899"},
     "esp32": {"bg": "bg-orange-500/20", "border": "border-orange-400/40", "text": "text-orange-300", "fill": "#F97316"},
     "raspberry": {"bg": "bg-green-500/20", "border": "border-green-400/40", "text": "text-green-300", "fill": "#22C55E"},
+    "servo": {"bg": "bg-yellow-500/20", "border": "border-yellow-400/40", "text": "text-yellow-300", "fill": "#EAB308"},
+    "humidity sensor": {"bg": "bg-teal-500/20", "border": "border-teal-400/40", "text": "text-teal-300", "fill": "#14B8A6"},
     "unknown": {"bg": "bg-gray-500/20", "border": "border-gray-400/40", "text": "text-gray-300", "fill": "#9CA3AF"},
 }
 
 
-def _calculate_layout_position(device: Dict[str, Any], index: int, total: int) -> tuple[float, float]:
+def _calculate_layout_position(device: Dict[str, Any], index: int, total: int, parent_pos: Optional[tuple] = None) -> tuple[float, float]:
     """
     Deterministic layout based on device type and role.
     Core infrastructure near the center, edge devices distributed around.
+    Sub-devices positioned near their parent.
     """
     device_type = device.get("type", "unknown").lower()
-    
+
+    # Sub-devices (servo, humidity sensor) cluster near parent
+    if device_type in {"servo motor", "servo", "humidity sensor"} and parent_pos:
+        import math
+        sub_index = device.get("_sub_index", 0)
+        # Fan out below/beside the parent
+        angle = -50 + sub_index * 100
+        radius = 16.0
+        x = parent_pos[0] + radius * math.cos(math.radians(angle))
+        y = parent_pos[1] + radius * math.sin(math.radians(angle))
+        x = max(5.0, min(95.0, x))
+        y = max(15.0, min(95.0, y))
+        return (x, y)
+
     # Core infrastructure (routers, switches, gateways) → center
     if device_type in {"router", "switch", "gateway"}:
         if index == 0:
@@ -48,19 +64,19 @@ def _calculate_layout_position(device: Dict[str, Any], index: int, total: int) -
             # Distribute horizontally near top
             x = 30.0 + (index * (40.0 / max(1, total - 1)))
             return (x, 35.0)
-    
+
     # Edge devices distributed around perimeter
-    angle = (index / max(1, total - 1)) * 360 if total > 1 else 0
+    angle = (index / max(1, total)) * 360
     radius = 25.0  # Distance from center
-    
+
     import math
     x = 50.0 + radius * math.cos(math.radians(angle))
     y = 50.0 + radius * math.sin(math.radians(angle))
-    
+
     # Clamp to safe bounds
     x = max(15.0, min(85.0, x))
     y = max(25.0, min(85.0, y))
-    
+
     return (x, y)
 
 
@@ -130,39 +146,72 @@ def _build_device_links(devices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Build network links based on device hierarchy.
     Routers/switches/gateways connect to edge devices.
+    Sub-devices (servo, humidity sensor) connect to their parent ESP32.
     """
     links = []
-    
-    # Separate core infrastructure from edge devices
+    sub_device_types = {"servo motor", "servo", "humidity sensor"}
+
+    # Separate core infrastructure, edge devices, and sub-devices
     core_devices = [d for d in devices if d.get("type", "").lower() in {"router", "switch", "gateway"}]
-    edge_devices = [d for d in devices if d.get("type", "").lower() not in {"router", "switch", "gateway"}]
-    
-    if not core_devices:
-        return links
-    
-    # Primary core device (usually first router/gateway)
-    primary_core = core_devices[0]
-    
-    # Connect all edge devices to primary core
-    for edge in edge_devices:
-        links.append({
-            "id": f"L_{primary_core['device_id']}_{edge['device_id']}",
-            "from": primary_core.get("device_id"),
-            "to": edge.get("device_id"),
-            "flows": 2,
-            "suspicious": False,
-        })
-    
-    # Connect core devices to each other (if multiple)
-    for i, core in enumerate(core_devices[1:], 1):
-        links.append({
-            "id": f"L_{primary_core['device_id']}_{core['device_id']}",
-            "from": primary_core.get("device_id"),
-            "to": core.get("device_id"),
-            "flows": 5,
-            "suspicious": False,
-        })
-    
+    sub_devices = [d for d in devices if d.get("type", "").lower() in sub_device_types]
+    edge_devices = [d for d in devices if d.get("type", "").lower() not in {"router", "switch", "gateway"} and d.get("type", "").lower() not in sub_device_types]
+
+    if core_devices:
+        primary_core = core_devices[0]
+
+        # Connect all edge devices to primary core
+        for edge in edge_devices:
+            links.append({
+                "id": f"L_{primary_core['device_id']}_{edge['device_id']}",
+                "from": primary_core.get("device_id"),
+                "to": edge.get("device_id"),
+                "flows": 2,
+                "suspicious": False,
+            })
+
+        # Connect core devices to each other (if multiple)
+        for i, core in enumerate(core_devices[1:], 1):
+            links.append({
+                "id": f"L_{primary_core['device_id']}_{core['device_id']}",
+                "from": primary_core.get("device_id"),
+                "to": core.get("device_id"),
+                "flows": 5,
+                "suspicious": False,
+            })
+    else:
+        # Fallback if no router: find Pi and use it as core
+        pi_device = next((d for d in edge_devices if "pi" in str(d.get("name", "")).lower() or d.get("type") == "raspberry_pi"), None)
+        if pi_device:
+            for edge in edge_devices:
+                if edge["device_id"] != pi_device["device_id"]:
+                    links.append({
+                        "id": f"L_{pi_device['device_id']}_{edge['device_id']}",
+                        "from": pi_device.get("device_id"),
+                        "to": edge.get("device_id"),
+                        "flows": 2,
+                        "suspicious": False,
+                    })
+
+    # Connect sub-devices to their parent ESP32
+    esp32_devices = [d for d in edge_devices if d.get("type", "").lower() == "esp32"]
+    for sub in sub_devices:
+        parent_id = sub.get("parent_device_id")
+        # Find the parent ESP32 by parent_device_id or default to first ESP32
+        parent = None
+        if parent_id:
+            parent = next((d for d in esp32_devices if d.get("device_id") == parent_id), None)
+        if not parent and esp32_devices:
+            parent = esp32_devices[0]
+
+        if parent:
+            links.append({
+                "id": f"L_{parent['device_id']}_{sub['device_id']}",
+                "from": parent.get("device_id"),
+                "to": sub.get("device_id"),
+                "flows": 1,
+                "suspicious": False,
+            })
+
     return links
 
 
@@ -199,8 +248,8 @@ def _correlate_threats_to_links(links: List[Dict[str, Any]], threats: List[Dict[
 
 async def build_topology(connected_only: bool = True) -> Dict[str, Any]:
     """
-    Build network topology from real devices and threats.
-    
+    Build network topology from real devices, sub-devices, and threats.
+
     Returns:
         {
             "nodes": [...],  # Device nodes with position
@@ -210,41 +259,83 @@ async def build_topology(connected_only: bool = True) -> Dict[str, Any]:
     """
     if db is None:
         return {"nodes": [], "links": [], "stats": {}}
-    
+
     # Fetch connected devices
     query = {"connected": True} if connected_only else {}
     devices_cursor = db.devices.find(query).sort("type", 1)
-    
+
     devices = []
     async for device in devices_cursor:
         normalized = normalize_device_document(device, "devices")
         devices.append(normalized)
-    
+
     if not devices:
         return {"nodes": [], "links": [], "stats": {"totalNodes": 0, "totalLinks": 0, "suspiciousLinks": 0}}
-    
-    # Build topology nodes with layout
+
+    # Fetch sub-devices (peripherals connected to ESP32s)
+    sub_devices_raw = []
+    try:
+        peripherals_cursor = db.device_peripherals.find({"active": True})
+        async for peripheral in peripherals_cursor:
+            sub_devices_raw.append(peripheral)
+    except Exception:
+        pass
+
+    # Build topology nodes with layout — first pass for main devices
     nodes = []
-    for index, device in enumerate(devices):
-        position = _calculate_layout_position(device, index, len(devices))
+    device_positions = {}  # device_id -> (x, y) for parent lookup
+    sub_device_types = {"servo motor", "servo", "humidity sensor"}
+
+    # Separate main devices from any sub-devices that might be in the devices collection
+    main_devices = [d for d in devices if d.get("type", "").lower() not in sub_device_types]
+
+    for index, device in enumerate(main_devices):
+        position = _calculate_layout_position(device, index, len(main_devices))
         node = _build_topology_node(device, position)
         nodes.append(node)
-    
-    # Build device links
+        device_positions[device.get("device_id")] = position
+
+    # Build sub-device nodes from peripherals collection
+    for sub_index, peripheral in enumerate(sub_devices_raw):
+        parent_id = peripheral.get("device_id")
+        parent_pos = device_positions.get(parent_id)
+
+        sub_device = {
+            "device_id": peripheral.get("peripheral_id", f"sub_{sub_index}"),
+            "name": peripheral.get("name", "Peripheral"),
+            "type": peripheral.get("peripheral_type", peripheral.get("type", "unknown")).replace("_", " "),
+            "ip": peripheral.get("parent_ip", ""),
+            "mac": "",
+            "status": "connected" if peripheral.get("active") else "detected",
+            "connected": peripheral.get("active", False),
+            "blocked": False,
+            "monitor": True,
+            "parent_device_id": parent_id,
+            "_sub_index": sub_index,
+        }
+
+        position = _calculate_layout_position(sub_device, sub_index, len(sub_devices_raw), parent_pos=parent_pos)
+        node = _build_topology_node(sub_device, position)
+        nodes.append(node)
+
+        # Add to devices list for link building
+        devices.append(sub_device)
+
+    # Build device links (including sub-device → ESP32 links)
     links = _build_device_links(devices)
-    
+
     # Fetch recent threats for correlation
     threats_cursor = db.threats.find().sort("timestamp", -1).limit(50)
     threats = []
     async for threat in threats_cursor:
         threats.append(threat)
-    
+
     # Correlate threats to links
     links = _correlate_threats_to_links(links, threats)
-    
+
     # Calculate stats
     suspicious_links = sum(1 for link in links if link.get("suspicious"))
-    
+
     return {
         "nodes": nodes,
         "links": links,

@@ -7,6 +7,7 @@ Correlates devices, topology, logs, and AI analysis into comprehensive case file
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 import hashlib
+import json
 import random
 
 try:
@@ -17,6 +18,7 @@ except ImportError:
 
 from device_registry import normalize_device_document, is_monitorable_device
 from agent.ai_engine import invoke_autonomous_agent
+from agent.tools import block_ip
 
 
 def _generate_investigation_id(threat_id: str) -> str:
@@ -221,39 +223,192 @@ def _build_timeline(threat: Dict[str, Any], affected_devices: List[Dict[str, Any
     return timeline
 
 
-def _generate_ai_analysis(threat: Dict[str, Any], evidence: Dict[str, Any], affected_devices: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Generate AI-powered investigation analysis."""
-    # Build context for AI
-    context = {
-        "threat_type": threat.get("type"),
-        "severity": threat.get("severity"),
-        "target_device": threat.get("targetDevice"),
-        "source_ip": threat.get("sourceIp"),
-        "affected_device_count": len(affected_devices),
-        "evidence": evidence,
+def _deep_ai_analysis(threat: Dict[str, Any], evidence: Dict[str, Any], affected_devices: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Generate deep AI-powered investigation analysis via Bedrock."""
+    import os
+
+    source_ip = threat.get("sourceIp", "unknown")
+    threat_type = threat.get("type", "unknown")
+    severity = threat.get("severity", "Medium")
+    device_count = len(affected_devices)
+    ip_count = len(evidence.get("suspiciousIPs", []))
+    anomalies = evidence.get("anomalies", [])
+
+    # Build focused investigation prompt for Bedrock
+    investigation_context = {
+        "event_type": "deep_investigation_analysis",
+        "instruction": (
+            "You are a senior cybersecurity forensic analyst. Analyze this cyber attack in depth. "
+            "Return STRICTLY valid JSON with these exact keys:\n"
+            "{\n"
+            '  "reasoning": "Detailed narrative of the attack — what happened, how the attacker operated, and the impact on the network",\n'
+            '  "mitigations": ["list of 4-6 specific actionable mitigation steps"],\n'
+            '  "confidence": <integer 60-95>,\n'
+            '  "attackTechnique": {\n'
+            '    "name": "Attack technique name (e.g. Network Service Scanning)",\n'
+            '    "mitreId": "MITRE ATT&CK technique ID (e.g. T1046)",\n'
+            '    "description": "How this technique works and why the attacker used it",\n'
+            '    "prevention": ["3-4 specific prevention measures to stop this attack in the future"]\n'
+            '  },\n'
+            '  "hackerProfile": {\n'
+            '    "estimatedLocation": "City, Country based on IP geolocation and behavior patterns",\n'
+            '    "attackPattern": "Description of the attack pattern (automated tool, manual, APT, etc.)",\n'
+            '    "riskLevel": "Critical/High/Medium/Low"\n'
+            '  }\n'
+            "}"
+        ),
+        "threat_type": threat_type,
+        "severity": severity,
+        "threat_score": threat.get("threatScore", 0),
+        "source_ip": source_ip,
+        "target_device": threat.get("targetDevice", "unknown"),
+        "affected_device_count": device_count,
+        "suspicious_ip_count": ip_count,
+        "anomalies": anomalies,
+        "evidence_summary": {
+            "suspicious_ips": [ip.get("ip") for ip in evidence.get("suspiciousIPs", [])],
+            "malware_indicators": [m.get("type") for m in evidence.get("malwareIndicators", [])],
+            "anomalies": anomalies,
+        },
+        "affected_devices": [
+            {"name": d.get("name"), "type": d.get("type"), "status": d.get("status")}
+            for d in affected_devices
+        ],
     }
-    
-    # Try to get real AI analysis if available
+
+    # Default result using fallback
+    result = {
+        "reasoning": _generate_fallback_reasoning(threat, evidence, affected_devices),
+        "mitigations": _generate_mitigations(threat, affected_devices),
+        "confidence": _calculate_confidence(threat, evidence, affected_devices),
+        "attackTechnique": _fallback_attack_technique(threat_type),
+        "hackerProfile": {
+            "estimatedLocation": _geolocate_ip(source_ip),
+            "attackPattern": "Automated scanning tool" if threat_type in ("port_scan", "brute_force") else "Targeted attack",
+            "riskLevel": severity,
+        },
+    }
+
+    if not os.getenv("BEDROCK_API_KEY"):
+        return result
+
     try:
-        ai_response = invoke_autonomous_agent(event_data=context)
-        if ai_response and isinstance(ai_response, dict) and "response" in ai_response:
-            reasoning = ai_response["response"]
-        else:
-            reasoning = _generate_fallback_reasoning(threat, evidence, affected_devices)
-    except Exception:
-        reasoning = _generate_fallback_reasoning(threat, evidence, affected_devices)
-    
-    # Generate mitigations
-    mitigations = _generate_mitigations(threat, affected_devices)
-    
-    # Calculate confidence
-    confidence = _calculate_confidence(threat, evidence, affected_devices)
-    
-    return {
-        "reasoning": reasoning,
-        "mitigations": mitigations,
-        "confidence": confidence,
+        ai_response = invoke_autonomous_agent(event_data=investigation_context)
+        if isinstance(ai_response, dict):
+            # Extract fields from AI response, falling back to defaults
+            if ai_response.get("reasoning"):
+                result["reasoning"] = ai_response["reasoning"]
+            elif isinstance(ai_response.get("response"), str) and len(ai_response["response"]) > 40:
+                result["reasoning"] = ai_response["response"]
+
+            if isinstance(ai_response.get("mitigations"), list) and ai_response["mitigations"]:
+                result["mitigations"] = ai_response["mitigations"][:6]
+
+            if isinstance(ai_response.get("confidence"), (int, float)):
+                result["confidence"] = min(95, max(60, int(ai_response["confidence"])))
+
+            if isinstance(ai_response.get("attackTechnique"), dict):
+                tech = ai_response["attackTechnique"]
+                result["attackTechnique"] = {
+                    "name": tech.get("name", result["attackTechnique"]["name"]),
+                    "mitreId": tech.get("mitreId", result["attackTechnique"]["mitreId"]),
+                    "description": tech.get("description", result["attackTechnique"]["description"]),
+                    "prevention": tech.get("prevention", result["attackTechnique"]["prevention"]),
+                }
+
+            if isinstance(ai_response.get("hackerProfile"), dict):
+                hp = ai_response["hackerProfile"]
+                result["hackerProfile"] = {
+                    "estimatedLocation": hp.get("estimatedLocation", result["hackerProfile"]["estimatedLocation"]),
+                    "attackPattern": hp.get("attackPattern", result["hackerProfile"]["attackPattern"]),
+                    "riskLevel": hp.get("riskLevel", result["hackerProfile"]["riskLevel"]),
+                }
+    except Exception as e:
+        print(f"Deep AI analysis error (using fallback): {e}")
+
+    return result
+
+
+def _fallback_attack_technique(threat_type: str) -> Dict[str, Any]:
+    """Fallback MITRE ATT&CK technique mapping when AI is unavailable."""
+    techniques = {
+        "port_scan": {
+            "name": "Network Service Scanning",
+            "mitreId": "T1046",
+            "description": "Attacker systematically probed open ports to discover running services and potential entry points.",
+            "prevention": [
+                "Deploy intrusion detection rules for sequential port access patterns",
+                "Implement port knocking or single-packet authorization",
+                "Restrict unnecessary open ports via network segmentation",
+            ],
+        },
+        "ddos_attempt": {
+            "name": "Network Denial of Service",
+            "mitreId": "T1498",
+            "description": "Volumetric flooding attack designed to exhaust network resources and deny service to legitimate users.",
+            "prevention": [
+                "Enable rate limiting and SYN flood protection at the firewall",
+                "Deploy upstream DDoS mitigation service",
+                "Implement traffic filtering with geo-blocking for non-essential regions",
+            ],
+        },
+        "data_exfiltration": {
+            "name": "Exfiltration Over C2 Channel",
+            "mitreId": "T1041",
+            "description": "Sensitive data was extracted from the network via an encrypted command-and-control channel.",
+            "prevention": [
+                "Monitor and alert on abnormal outbound data volumes",
+                "Deploy DLP rules to detect sensitive data in network flows",
+                "Enforce TLS inspection on outbound traffic",
+            ],
+        },
+        "brute_force": {
+            "name": "Brute Force - Password Spraying",
+            "mitreId": "T1110.003",
+            "description": "Automated credential guessing attack targeting device management interfaces.",
+            "prevention": [
+                "Enforce account lockout after 5 failed attempts",
+                "Deploy MFA on all management interfaces",
+                "Use certificate-based authentication for IoT devices",
+            ],
+        },
+        "malware_detected": {
+            "name": "User Execution - Malicious File",
+            "mitreId": "T1204.002",
+            "description": "Malware payload was delivered and executed on the target device.",
+            "prevention": [
+                "Deploy endpoint detection and response (EDR) on all devices",
+                "Enable application whitelisting to block unauthorized binaries",
+                "Keep firmware and software up to date with security patches",
+            ],
+        },
+        "iot_botnet": {
+            "name": "Resource Hijacking - IoT Botnet",
+            "mitreId": "T1496",
+            "description": "IoT devices were compromised and recruited into a botnet for coordinated malicious activity.",
+            "prevention": [
+                "Change default credentials on all IoT devices",
+                "Segment IoT devices onto isolated VLANs",
+                "Monitor for unusual outbound connection patterns from IoT devices",
+            ],
+        },
+        "firmware_exploit": {
+            "name": "Exploitation of Remote Services",
+            "mitreId": "T1210",
+            "description": "Attacker exploited a vulnerability in device firmware to gain unauthorized access.",
+            "prevention": [
+                "Schedule regular firmware vulnerability scanning",
+                "Apply firmware patches within 48 hours of release",
+                "Disable unused remote management interfaces",
+            ],
+        },
     }
+    return techniques.get(threat_type, {
+        "name": "Unknown Technique",
+        "mitreId": "N/A",
+        "description": "Attack technique requires further analysis to classify.",
+        "prevention": ["Conduct full forensic analysis", "Review network logs for indicators of compromise"],
+    })
 
 
 def _generate_fallback_reasoning(threat: Dict[str, Any], evidence: Dict[str, Any], affected_devices: List[Dict[str, Any]]) -> str:
@@ -380,14 +535,37 @@ async def build_investigation(threat: Dict[str, Any]) -> Dict[str, Any]:
     affected_devices = _correlate_affected_devices(threat)
     evidence = _collect_evidence(threat, affected_devices)
     timeline = _build_timeline(threat, affected_devices)
-    ai_analysis = _generate_ai_analysis(threat, evidence, affected_devices)
-    
+    ai_analysis = _deep_ai_analysis(threat, evidence, affected_devices)
+
+    # Proactive IP blocking for Critical/High severity threats
+    blocked_ips_list = []
+    source_ip = threat.get("sourceIp", "")
+    severity = threat.get("severity", "Medium")
+    if source_ip and source_ip != "unknown" and severity in ("Critical", "High"):
+        technique_name = ai_analysis.get("attackTechnique", {}).get("name", "Unknown")
+        block_ip(source_ip)
+        blocked_entry = {
+            "ip": source_ip,
+            "reason": f"Auto-blocked during investigation {investigation_id}: {technique_name}",
+            "technique": technique_name,
+            "threat_type": threat.get("type", "unknown"),
+            "investigation_id": investigation_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        if db is not None:
+            await db.blocked_ips.update_one(
+                {"ip": source_ip, "investigation_id": investigation_id},
+                {"$set": blocked_entry},
+                upsert=True,
+            )
+        blocked_ips_list.append(blocked_entry)
+
     investigation = {
         "id": investigation_id,
         "threat_id": str(threat.get("_id", "")),
         "title": classification,
         "status": "in-progress",
-        "severity": threat.get("severity", "Medium"),
+        "severity": severity,
         "created": threat.get("timestamp", datetime.utcnow().isoformat()),
         "analyst": "AI Autonomous Agent",
         "riskScore": ai_analysis["confidence"],
@@ -397,6 +575,9 @@ async def build_investigation(threat: Dict[str, Any]) -> Dict[str, Any]:
         "evidence": evidence,
         "timeline": timeline,
         "aiAnalysis": ai_analysis,
+        "attackTechnique": ai_analysis.get("attackTechnique", {}),
+        "hackerProfile": ai_analysis.get("hackerProfile", {}),
+        "blockedIPs": blocked_ips_list,
         "threat": {
             "type": threat.get("type"),
             "source_ip": threat.get("sourceIp"),
@@ -404,7 +585,7 @@ async def build_investigation(threat: Dict[str, Any]) -> Dict[str, Any]:
             "threat_score": threat.get("threatScore"),
         },
     }
-    
+
     # Store in MongoDB
     if db is not None:
         await db.investigations.update_one(
@@ -412,7 +593,7 @@ async def build_investigation(threat: Dict[str, Any]) -> Dict[str, Any]:
             {"$set": investigation},
             upsert=True,
         )
-    
+
     return investigation
 
 
@@ -426,14 +607,37 @@ def build_investigation_sync(threat: Dict[str, Any]) -> Dict[str, Any]:
     affected_devices = _correlate_affected_devices(threat)
     evidence = _collect_evidence(threat, affected_devices)
     timeline = _build_timeline(threat, affected_devices)
-    ai_analysis = _generate_ai_analysis(threat, evidence, affected_devices)
-    
+    ai_analysis = _deep_ai_analysis(threat, evidence, affected_devices)
+
+    # Proactive IP blocking for Critical/High severity threats
+    blocked_ips_list = []
+    source_ip = threat.get("sourceIp", "")
+    severity = threat.get("severity", "Medium")
+    if source_ip and source_ip != "unknown" and severity in ("Critical", "High"):
+        technique_name = ai_analysis.get("attackTechnique", {}).get("name", "Unknown")
+        block_ip(source_ip)
+        blocked_entry = {
+            "ip": source_ip,
+            "reason": f"Auto-blocked during investigation {investigation_id}: {technique_name}",
+            "technique": technique_name,
+            "threat_type": threat.get("type", "unknown"),
+            "investigation_id": investigation_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        if sync_db is not None:
+            sync_db.blocked_ips.update_one(
+                {"ip": source_ip, "investigation_id": investigation_id},
+                {"$set": blocked_entry},
+                upsert=True,
+            )
+        blocked_ips_list.append(blocked_entry)
+
     investigation = {
         "id": investigation_id,
         "threat_id": str(threat.get("_id", "")),
         "title": classification,
         "status": "in-progress",
-        "severity": threat.get("severity", "Medium"),
+        "severity": severity,
         "created": threat.get("timestamp", datetime.utcnow().isoformat()),
         "analyst": "AI Autonomous Agent",
         "riskScore": ai_analysis["confidence"],
@@ -443,6 +647,9 @@ def build_investigation_sync(threat: Dict[str, Any]) -> Dict[str, Any]:
         "evidence": evidence,
         "timeline": timeline,
         "aiAnalysis": ai_analysis,
+        "attackTechnique": ai_analysis.get("attackTechnique", {}),
+        "hackerProfile": ai_analysis.get("hackerProfile", {}),
+        "blockedIPs": blocked_ips_list,
         "threat": {
             "type": threat.get("type"),
             "source_ip": threat.get("sourceIp"),
@@ -450,7 +657,7 @@ def build_investigation_sync(threat: Dict[str, Any]) -> Dict[str, Any]:
             "threat_score": threat.get("threatScore"),
         },
     }
-    
+
     # Store in MongoDB
     if sync_db is not None:
         sync_db.investigations.update_one(
@@ -466,7 +673,7 @@ def build_investigation_sync(threat: Dict[str, Any]) -> Dict[str, Any]:
                 {"_id": threat_oid},
                 {"$set": {"investigation_id": investigation_id}},
             )
-    
+
     return investigation
 
 

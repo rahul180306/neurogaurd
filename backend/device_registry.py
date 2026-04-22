@@ -13,6 +13,10 @@ SUPPORTED_DEVICE_TYPES = {
     "esp32",
     "raspberry",
     "unknown",
+    "servo",
+    "humidity sensor",
+    "switch",
+    "gateway",
 }
 
 DEVICE_IMAGE_MAP = {
@@ -25,6 +29,10 @@ DEVICE_IMAGE_MAP = {
     "esp32": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/cpu.svg",
     "raspberry": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/server.svg",
     "unknown": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/help-circle.svg",
+    "servo": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/settings.svg",
+    "humidity sensor": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/droplet.svg",
+    "switch": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/share-2.svg",
+    "gateway": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/globe.svg",
 }
 
 

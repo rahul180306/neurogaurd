@@ -166,11 +166,11 @@ Avoid unnecessary filler text.
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
         )
 
-        model_id = "amazon.nova-lite-v1:0" # Working US cross-region inference profile
+        model_id = "anthropic.claude-3-haiku-20240307-v1:0" # Working US cross-region inference profile
 
         # For the proxy API key approach, Boto3 might not work perfectly if it's not a standard AWS Signature V4 endpoint.
         # But we will try to use the HTTP POST approach again, specifically fixing the cross-region model ID that works in NextJS.
-        model_id = "amazon.nova-lite-v1:0"
+        model_id = "anthropic.claude-3-haiku-20240307-v1:0"
         url = f"https://bedrock-runtime.{region}.amazonaws.com/model/{model_id}/converse"
         
         headers = {

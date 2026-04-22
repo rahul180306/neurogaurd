@@ -120,7 +120,7 @@ export default function Devices() {
                 throw new Error(`HTTP ${response.status}`);
             }
             const data = await response.json();
-            const uniqueData = Array.from(new Map(data.map(item => [item.device_id || item.mac_address || item.id, item])).values());
+            const uniqueData = Array.from(new Map(data.map(item => [item._id || item.device_id || item.mac || item.id, item])).values());
             setDevices(uniqueData);
         } catch (error) {
             console.error("Failed to load devices:", error);
@@ -161,7 +161,7 @@ export default function Devices() {
         }
         setDevices((currentDevices) => {
             const nextDevices = [...currentDevices];
-            const index = nextDevices.findIndex((device) => device.device_id === updatedDevice.device_id);
+            const index = nextDevices.findIndex((device) => (device._id || device.device_id) === (updatedDevice._id || updatedDevice.device_id));
             if (index >= 0) {
                 nextDevices[index] = updatedDevice;
             } else {
@@ -218,8 +218,8 @@ export default function Devices() {
             socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    // Prevent duplicate devices
-                    const uniqueData = Array.from(new Map(data.map(item => [item.device_id || item.mac_address || item.id, item])).values());
+                    // Prevent duplicate devices using primary _id to avoid masking distinct DB entries
+                    const uniqueData = Array.from(new Map(data.map(item => [item._id || item.device_id || item.mac || item.id, item])).values());
                     setDevices(uniqueData);
                 } catch (e) {
                     console.error("WebSocket message parsing error:", e);
@@ -551,7 +551,7 @@ export default function Devices() {
                         animate="show"
                         key={filter}
                     >
-                        {filteredDevices.map((device) => {
+                        {filteredDevices.map((device, index) => {
                             const state = device.status || (device.blocked ? "blocked" : device.connected ? "connected" : "detected");
                             const isBlocked = state === "blocked";
                             const isConnected = state === "connected";
@@ -559,13 +559,13 @@ export default function Devices() {
                             const isUnknown = !isConnected;
                             const guessedType = (device.type_guess || "unknown").toLowerCase();
                             const devType = (device.type || device.type_guess || "unknown").toLowerCase();
-                            const imgUrl = deviceImages[devType] || "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/help-circle.svg";
+                            const imgUrl = (deviceImages[devType] && deviceImages[devType] !== "pending") ? deviceImages[devType] : "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/help-circle.svg";
                             const stateTheme = statusColor[state] || statusColor.detected;
                             const defaultConnectName = device.name || (device.hostname ? device.hostname.replace(/[-_.]+/g, " ") : `${(device.type || device.type_guess || "device")} device`);
 
                             return (
                                 <motion.div
-                                    key={device.device_id || device.id}
+                                    key={device._id || device.device_id || `dev-${index}`}
                                     variants={itemVariants}
                                     whileHover={{ y: -6, scale: 1.02, transition: { duration: 0.2 } }}
                                     className={`relative overflow-hidden rounded-2xl p-5 flex flex-col gap-4 border ${isBlocked ? 'border-rose-500/40 bg-rose-500/5' : isDetected ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10'} cursor-pointer group`}

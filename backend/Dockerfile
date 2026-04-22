@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 # System deps for nmap (network scanner) and scapy (packet capture)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nmap libpcap-dev curl \
+    nmap libpcap-dev curl iptables \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

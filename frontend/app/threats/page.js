@@ -4,8 +4,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { fetchApiJson } from "@/lib/api";
 import { getWsBaseUrl } from "@/lib/api";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
+
+const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 const severityConfig = {
     critical: { color: "text-rose-300", bg: "bg-rose-500/20", border: "border-rose-500/30", dot: "bg-rose-400", glow: "shadow-[0_0_8px_rgba(251,113,133,0.8)]", gradient: "from-rose-500 to-red-600", stroke: "#F43F5E" },
@@ -64,15 +66,8 @@ export default function Threats() {
     const [actions, setActions] = useState([]);
     const [locations, setLocations] = useState([]);
     const [activeFilter, setActiveFilter] = useState("all");
-    const [scanPulse, setScanPulse] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
-
-    // Radar scan effect
-    useEffect(() => {
-        const interval = setInterval(() => setScanPulse(p => (p + 1) % 100), 50);
-        return () => clearInterval(interval);
-    }, []);
 
     useEffect(() => {
         const loadThreatData = async () => {
@@ -155,28 +150,15 @@ export default function Threats() {
         })[0] || null;
     }, [normalizedThreats]);
 
-    const radarNodes = useMemo(() => {
-        const sourceThreats = normalizedThreats.filter((threat) => Number.isFinite(threat.lat) && Number.isFinite(threat.lng));
-        const sourceLocations = sourceThreats.length > 0 ? sourceThreats : locations.map((location) => ({
-            id: location.ip,
-            sourceIp: location.ip,
-            lat: location.lat,
-            lng: location.lng,
-            severityKey: "medium",
-        }));
-
-        return sourceLocations.slice(0, 6).map((node, index) => {
-            const angle = (((Number(node.lng) + 180) / 360) * 360 + index * 17) % 360;
-            const distance = 70 + Math.max(0, Math.min(80, (90 - Math.abs(Number(node.lat))) * 0.7));
-            return {
-                id: node.id || `${node.sourceIp}-${index}`,
-                label: node.sourceIp || `origin-${index}`,
-                sev: node.severityKey || "medium",
-                angle,
-                dist: distance,
-            };
-        });
-    }, [locations, normalizedThreats]);
+    const mapMarkers = useMemo(() => {
+        const fromThreats = normalizedThreats
+            .filter((t) => Number.isFinite(t.lat) && Number.isFinite(t.lng))
+            .map((t, i) => ({ id: t.id || `t-${i}`, ip: t.sourceIp, lat: t.lat, lng: t.lng, severityKey: t.severityKey, type: t.type }));
+        if (fromThreats.length > 0) return fromThreats;
+        return locations
+            .filter((l) => l.lat && l.lng && !isNaN(l.lat) && !isNaN(l.lng))
+            .map((l, i) => ({ id: `loc-${i}`, ip: l.ip, lat: l.lat, lng: l.lng, severityKey: "medium", type: "unknown" }));
+    }, [normalizedThreats, locations]);
 
     const currentSummary = selectedThreat?.aiSummary || topThreat?.aiSummary || "No active enriched threat summary available. Monitoring continues across connected devices only.";
 
@@ -399,92 +381,137 @@ export default function Threats() {
                     </div>
                 </motion.div>
 
-                {/* ═══════════  MIDDLE ROW: Threat Map (Sonar) + Attack Path  ═══════════ */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* ═══════════  4. GLOBAL THREAT ORIGIN MAP  ═══════════ */}
+                <motion.div variants={itemVariants} className="border border-white/10 bg-black/40 p-5 relative overflow-hidden">
+                    {/* HUD Corner Decorations */}
+                    <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-rose-500/40"></div>
+                    <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-rose-500/40"></div>
+                    <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-rose-500/40"></div>
+                    <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-rose-500/40"></div>
 
-                    {/* 4. THREAT ORIGIN MAP (Advanced Sonar UI) */}
-                    <motion.div variants={itemVariants} className="border border-white/10 bg-black/40 p-5 relative overflow-hidden min-h-[300px] flex flex-col">
-                        <div className="flex items-center gap-2 z-10">
+                    <div className="flex items-center justify-between mb-4 z-10 relative">
+                        <div className="flex items-center gap-2">
                             {icons.globe}
-                            <span className="text-white/80 font-mono text-xs font-bold tracking-widest uppercase">Global_Radar</span>
+                            <span className="text-white/80 font-mono text-xs font-bold tracking-widest uppercase">Global_Threat_Map</span>
                         </div>
-                        
-                        <div className="flex-1 mt-4 relative bg-black/50 border border-white/5 rounded-lg overflow-hidden flex items-center justify-center">
-                            {/* HUD Grid */}
-                            <svg className="absolute inset-0 w-full h-full opacity-20" xmlns="http://www.w3.org/2000/svg">
-                                <defs><pattern id="hudGrid" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M 30 0 L 0 0 0 30" fill="none" stroke="#22D3EE" strokeWidth="0.5"/></pattern></defs>
-                                <rect width="100%" height="100%" fill="url(#hudGrid)" />
-                            </svg>
-                            
-                            {/* Radar Circles */}
-                            <div className="absolute w-[200px] h-[200px] border border-cyan-500/20 rounded-full"></div>
-                            <div className="absolute w-[100px] h-[100px] border border-cyan-500/30 rounded-full"></div>
-                            <div className="absolute w-[300px] h-[300px] border border-cyan-500/10 rounded-full"></div>
+                        <div className="flex items-center gap-2">
+                            <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                            </span>
+                            <span className="text-[10px] text-white/40 font-mono uppercase tracking-widest">Live Tracking</span>
+                        </div>
+                    </div>
 
-                            {/* Sweeping Radar Scanner Line */}
-                            <div className="absolute w-[300px] h-[300px] rounded-full pointer-events-none" style={{ transform: `rotate(${scanPulse * 3.6}deg)` }}>
-                                <div className="absolute top-0 left-1/2 w-[150px] h-[150px] origin-bottom-left" style={{ background: 'conic-gradient(from 0deg, transparent 0%, rgba(6,182,212,0.4) 90%, rgba(6,182,212,0.8) 100%)' }}></div>
-                                <div className="absolute top-0 left-1/2 w-[2px] h-[150px] bg-cyan-400 shadow-[0_0_10px_#22D3EE]"></div>
+                    <div className="w-full h-[360px] relative bg-[#060a12] border border-white/5 overflow-hidden">
+                        {/* Subtle grid overlay */}
+                        <div className="absolute inset-0 z-0 opacity-[0.06]" style={{ backgroundImage: `radial-gradient(circle at center, #22D3EE 1px, transparent 1px)`, backgroundSize: '30px 30px' }}></div>
+                        {/* Glow */}
+                        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(244,63,94,0.06)_0%,transparent_70%)]"></div>
+
+                        {mapMarkers.length === 0 && (
+                            <div className="absolute inset-0 z-20 flex items-center justify-center">
+                                <span className="text-white/40 text-sm font-mono">No geolocated origins detected</span>
                             </div>
-                            
-                            {/* Target Center */}
-                            <div className="w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_10px_#22D3EE] z-10 relative"></div>
-                            
-                            {/* Threat Nodes */}
-                            {radarNodes.length === 0 ? (
-                                <div className="relative z-10 text-sm text-white/45">No geolocated threat origins available</div>
-                            ) : radarNodes.map((node, i) => {
-                                const rad = node.angle * (Math.PI / 180);
-                                const x = Math.cos(rad) * node.dist;
-                                const y = Math.sin(rad) * node.dist;
-                                const s = severityConfig[node.sev] || severityConfig.medium;
-                                
+                        )}
+
+                        <ComposableMap
+                            projection="geoMercator"
+                            projectionConfig={{ scale: 120, center: [20, 20] }}
+                            className="w-full h-full"
+                            style={{ background: "transparent" }}
+                        >
+                            <Geographies geography={geoUrl}>
+                                {({ geographies }) =>
+                                    geographies.map((geo) => (
+                                        <Geography
+                                            key={geo.rsmKey}
+                                            geography={geo}
+                                            fill="#111827"
+                                            stroke="#1e293b"
+                                            strokeWidth={0.4}
+                                            style={{
+                                                default: { outline: "none" },
+                                                hover: { fill: "#1a2332", outline: "none" },
+                                                pressed: { outline: "none" },
+                                            }}
+                                        />
+                                    ))
+                                }
+                            </Geographies>
+
+                            {mapMarkers.map((marker, index) => {
+                                const sev = severityConfig[marker.severityKey] || severityConfig.medium;
                                 return (
-                                    <div key={`${node.id}-${i}`} className="absolute z-10 group/node cursor-pointer" style={{ transform: `translate(${x}px, ${y}px)` }}>
-                                        <div className={`w-3 h-3 rounded-full ${s.dot} ${s.glow} animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]`}></div>
-                                        <div className="absolute -top-6 left-5 opacity-0 group-hover/node:opacity-100 transition-opacity bg-black/90 border border-white/10 px-2 py-1 text-[9px] font-mono text-white/90 whitespace-nowrap">
-                                            {node.label} [{node.sev.toUpperCase()}]
-                                        </div>
-                                        {/* Connection line back to center */}
-                                        <svg className="absolute w-0 h-0 overflow-visible pointer-events-none">
-                                            <line x1="0" y1="0" x2={-x} y2={-y} stroke={s.stroke} strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
-                                        </svg>
-                                    </div>
+                                    <Marker key={`${marker.id}-${index}`} coordinates={[marker.lng, marker.lat]}>
+                                        <motion.g
+                                            initial={{ scale: 0, opacity: 0 }}
+                                            animate={{ scale: 1, opacity: 1 }}
+                                            transition={{ type: "spring", stiffness: 200, damping: 12, delay: index * 0.05 }}
+                                        >
+                                            {/* Ripple ring */}
+                                            <motion.circle
+                                                r={8}
+                                                fill={sev.stroke}
+                                                fillOpacity={0.25}
+                                                initial={{ scale: 0.5 }}
+                                                animate={{ scale: 2.5, opacity: 0 }}
+                                                transition={{ repeat: Infinity, duration: 2, ease: "easeOut" }}
+                                            />
+                                            {/* Core dot */}
+                                            <circle r={3.5} fill={sev.stroke} stroke="#000" strokeWidth={0.8} />
+                                        </motion.g>
+
+                                        {/* Tooltip */}
+                                        <g className="group/marker">
+                                            <circle r={12} fill="transparent" className="cursor-pointer" />
+                                            <foreignObject x={10} y={-20} width={160} height={40} className="pointer-events-none opacity-0 group-hover/marker:opacity-100 transition-opacity">
+                                                <div className="bg-black/95 border border-white/20 px-2 py-1 text-[9px] font-mono text-white/90 whitespace-nowrap backdrop-blur-sm">
+                                                    {marker.ip} <span style={{ color: sev.stroke }}>[{marker.severityKey.toUpperCase()}]</span>
+                                                </div>
+                                            </foreignObject>
+                                        </g>
+                                    </Marker>
                                 );
                             })}
+                        </ComposableMap>
+                    </div>
+
+                    <div className="mt-3 flex justify-between items-center text-[10px] text-white/30 font-mono uppercase tracking-widest">
+                        <span>Origins_Detected: {mapMarkers.length}</span>
+                        <span>IP Geolocation Resolved</span>
+                    </div>
+                </motion.div>
+
+                {/* ═══════════  5. AI INTELLIGENCE & AUTO RESPONSE  ═══════════ */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <motion.div variants={itemVariants} className="border border-white/10 bg-black/40 p-5 relative overflow-hidden min-h-[160px]">
+                        <div className="absolute right-0 top-0 text-[100px] text-violet-500/5 rotate-12 -mt-4 mr-2 pointer-events-none font-black block">AI</div>
+                        <div className="flex items-center gap-2 mb-3">
+                            {icons.cpu}
+                            <span className="text-white/80 font-mono text-xs font-bold tracking-widest uppercase">Neuro_AI Analysis</span>
                         </div>
+                        <p className="text-white/60 text-xs font-mono leading-relaxed border-l-2 border-violet-500 pl-3">
+                            <span className="text-violet-400 font-bold mb-1 block">&gt; SYNC_PATTERN_DETECTED</span>
+                            {currentSummary}
+                        </p>
                     </motion.div>
 
-                    {/* 5. AI INTELLIGENCE & AUTO RESPONSE */}
-                    <motion.div variants={itemVariants} className="flex flex-col gap-4">
-                        <div className="border border-white/10 bg-black/40 p-5 relative overflow-hidden h-[160px]">
-                            <div className="absolute right-0 top-0 text-[100px] text-violet-500/5 rotate-12 -mt-4 mr-2 pointer-events-none font-black block">AI</div>
-                            <div className="flex items-center gap-2 mb-3">
-                                {icons.cpu}
-                                <span className="text-white/80 font-mono text-xs font-bold tracking-widest uppercase">Neuro_AI Analysis</span>
-                            </div>
-                            <p className="text-white/60 text-xs font-mono leading-relaxed border-l-2 border-violet-500 pl-3">
-                                <span className="text-violet-400 font-bold mb-1 block">&gt; SYNC_PATTERN_DETECTED</span>
-                                {currentSummary}
-                            </p>
+                    <motion.div variants={itemVariants} className="border border-white/10 bg-black/40 p-5 relative overflow-hidden min-h-[160px] flex flex-col">
+                        <div className="flex items-center gap-2 mb-3">
+                            {icons.bolt}
+                            <span className="text-white/80 font-mono text-xs font-bold tracking-widest uppercase">Auto_Response Log</span>
                         </div>
-
-                        <div className="border border-white/10 bg-black/40 p-5 relative overflow-hidden flex-1 flex flex-col">
-                            <div className="flex items-center gap-2 mb-3">
-                                {icons.bolt}
-                                <span className="text-white/80 font-mono text-xs font-bold tracking-widest uppercase">Auto_Response Log</span>
-                            </div>
-                            <div className="flex flex-col gap-2 overflow-y-auto pr-2 custom-scrollbar">
-                                {actions.length === 0 ? (
-                                    <div className="text-sm text-white/45">No autonomous responses recorded.</div>
-                                ) : actions.map((action, index) => (
-                                    <div key={action._id || index} className="flex items-center gap-3 p-2 border-l-2 border-emerald-500 bg-white/[0.02]">
-                                        <span className="text-emerald-400/50 text-[10px] font-mono shrink-0">{new Date(action.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
-                                        <span className="text-white/80 text-[11px] font-bold uppercase w-28 shrink-0">{action.action}</span>
-                                        <span className="text-white/40 text-[10px] truncate">{action.detail}</span>
-                                    </div>
-                                ))}
-                            </div>
+                        <div className="flex flex-col gap-2 overflow-y-auto pr-2 custom-scrollbar">
+                            {actions.length === 0 ? (
+                                <div className="text-sm text-white/45">No autonomous responses recorded.</div>
+                            ) : actions.map((action, index) => (
+                                <div key={action._id || index} className="flex items-center gap-3 p-2 border-l-2 border-emerald-500 bg-white/[0.02]">
+                                    <span className="text-emerald-400/50 text-[10px] font-mono shrink-0">{new Date(action.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                                    <span className="text-white/80 text-[11px] font-bold uppercase w-28 shrink-0">{action.action}</span>
+                                    <span className="text-white/40 text-[10px] truncate">{action.detail}</span>
+                                </div>
+                            ))}
                         </div>
                     </motion.div>
                 </div>
@@ -568,7 +595,7 @@ export default function Threats() {
                                         🔍 View Investigation
                                     </button>
                                     <button 
-                                        onClick={() => router.push(`/network?show_attack_path=${selectedThreat.id}`)}
+                                        onClick={() => router.push(`/network?highlight_ip=${encodeURIComponent(selectedThreat.sourceIp)}`)}
                                         className="flex-1 px-4 py-3 bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:bg-rose-500/30 transition-colors text-sm font-semibold"
                                     >
                                         🌐 Trace in Network

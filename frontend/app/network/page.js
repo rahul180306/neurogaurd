@@ -41,6 +41,10 @@ const deviceTypeColors = {
     Camera: { bg: "bg-rose-500/20", border: "border-rose-400/40", text: "text-rose-300", fill: "#F43F5E" },
     Sensor: { bg: "bg-emerald-500/20", border: "border-emerald-400/40", text: "text-emerald-300", fill: "#10B981" },
     Workstation: { bg: "bg-amber-500/20", border: "border-amber-400/40", text: "text-amber-300", fill: "#F59E0B" },
+    Esp32: { bg: "bg-orange-500/20", border: "border-orange-400/40", text: "text-orange-300", fill: "#F97316" },
+    Raspberry: { bg: "bg-green-500/20", border: "border-green-400/40", text: "text-green-300", fill: "#22C55E" },
+    Servo: { bg: "bg-yellow-500/20", border: "border-yellow-400/40", text: "text-yellow-300", fill: "#EAB308" },
+    "Humidity Sensor": { bg: "bg-teal-500/20", border: "border-teal-400/40", text: "text-teal-300", fill: "#14B8A6" },
 };
 
 /* ───────────────────  ICONS  ─────────────────── */
@@ -365,6 +369,8 @@ export default function NetworkPage() {
                             <div className="flex gap-4">
                                 <span className="flex items-center gap-2 text-[10px] font-mono text-white/50"><div className="w-2 h-[2px] bg-[#3B82F6]"></div> Standard</span>
                                 <span className="flex items-center gap-2 text-[10px] font-mono text-white/50"><div className="w-2 h-[2px] bg-[#F43F5E] border-dashed text-transparent">--</div> Suspicious</span>
+                                <span className="flex items-center gap-2 text-[10px] font-mono text-white/50"><div className="w-3 h-3 rounded-full bg-[#22C55E]"></div> RPi</span>
+                                <span className="flex items-center gap-2 text-[10px] font-mono text-white/50"><div className="w-3 h-3 rounded-full bg-[#F97316]"></div> ESP32</span>
                             </div>
                         </div>
 
@@ -385,9 +391,9 @@ export default function NetworkPage() {
 
                                     return (
                                         <g key={link.id}>
-                                            <path id={`path-${link.id}`} d={pathD} fill="none" stroke={strokeColor} strokeWidth="0.3" strokeDasharray={link.suspicious ? "1.5 1.5" : "none"} opacity={link.suspicious ? 0.8 : 0.3} />
-                                            {Array.from({length: link.flows}).map((_, i) => (
-                                                <circle key={i} r="0.6" fill={strokeColor} className={link.suspicious ? "shadow-[0_0_5px_#F43F5E]" : "shadow-[0_0_5px_#3B82F6]"}>
+                                            <path id={`path-${link.id}`} d={pathD} fill="none" stroke={strokeColor} strokeWidth="1.2" strokeDasharray={link.suspicious ? "3 3" : "none"} opacity={link.suspicious ? 0.8 : 0.4} />
+                                            {Array.from({length: Math.max(1, link.flows)}).map((_, i) => (
+                                                <circle key={i} r="1.5" fill={strokeColor} className={link.suspicious ? "shadow-[0_0_8px_#F43F5E]" : "shadow-[0_0_8px_#3B82F6]"}>
                                                     <animateMotion dur={`${2 + Math.random()}s`} repeatCount="indefinite" begin={`${i * 0.5}s`}>
                                                         <mpath href={`#path-${link.id}`} />
                                                     </animateMotion>
@@ -401,19 +407,28 @@ export default function NetworkPage() {
                             {networkDevices.map((device) => {
                                 const cfg = deviceTypeColors[device.type] || { bg: "bg-gray-500/20", border: "border-gray-400/40", text: "text-gray-300", fill: "#6B7280" };
                                 const isThreat = device.threatScore > 30;
+                                const isEsp32 = (device.type || '').toLowerCase() === 'esp32';
+                                const isRaspberry = (device.type || '').toLowerCase() === 'raspberry';
+                                const isSubDevice = (device.type || '').toLowerCase().includes('servo') || (device.type || '').toLowerCase().includes('humidity');
+                                const nodeSize = isSubDevice ? 'w-14 h-14 p-2' : 'w-20 h-20 p-3';
+                                const typeLabel = isEsp32 ? 'E' : isRaspberry ? 'R' : isSubDevice ? (device.type || 'U').charAt(0).toUpperCase() : (device.type || 'U').charAt(0).toUpperCase();
                                 return (
                                     <motion.div key={device.id} className="absolute cursor-pointer flex flex-col items-center group/node z-20"
-                                        style={{ left: `${device.x}%`, top: `${device.y}%`, transform: "translate(-50%, -50%)" }}
-                                        whileHover={{ scale: 1.15 }}
+                                        style={{ left: `${device.x}%`, top: `${device.y}%` }}
+                                        initial={{ x: "-50%", y: "-50%", scale: 1 }}
+                                        animate={{ x: "-50%", y: "-50%", scale: 1 }}
+                                        whileHover={{ x: "-50%", y: "-50%", scale: 1.15 }}
                                         onClick={() => router.push(`/devices?filter=${encodeURIComponent(device.name)}`)}>
-                                        <div className={`relative flex items-center justify-center p-2 rounded-md border ${cfg.bg} ${cfg.border} backdrop-blur-md ${isThreat ? 'border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.3)]' : ''} hover:border-cyan-400/60 transition-colors`}>
-                                            {isThreat && <div className="absolute inset-0 border border-rose-500/80 animate-ping rounded-md"></div>}
-                                            <span className="text-[10px] font-black text-white mix-blend-overlay">{(device.type || 'U').charAt(0)}</span>
-                                            {device.status === 'offline' && <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-[8px] font-mono text-white/50">OFF</div>}
+                                        <div className={`relative flex items-center justify-center ${nodeSize} rounded-xl border-2 ${cfg.bg} ${cfg.border} backdrop-blur-md ${isThreat ? 'border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.3)]' : ''} ${isEsp32 ? 'shadow-[0_0_10px_rgba(249,115,22,0.3)]' : ''} ${isRaspberry ? 'shadow-[0_0_10px_rgba(34,197,94,0.3)]' : ''} hover:border-cyan-400/60 transition-colors`}>
+                                            {isThreat && <div className="absolute inset-0 border-2 border-rose-500/80 animate-ping rounded-xl"></div>}
+                                            {(isEsp32 || isRaspberry) && <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#10B981]"></div>}
+                                            <span className={`text-2xl font-black ${isSubDevice ? 'text-lg' : ''} text-white mix-blend-overlay`}>{typeLabel}</span>
+                                            {device.status === 'offline' && <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-xs font-mono text-white/70">OFF</div>}
                                         </div>
-                                        <div className="mt-1 flex flex-col items-center bg-black/80 px-2 py-0.5 rounded border border-white/5 group-hover/node:border-cyan-400/30 transition-colors">
-                                            <span className="text-[8px] font-mono text-white/80 whitespace-nowrap group-hover/node:text-cyan-300">{device.name}</span>
-                                            {isThreat && <span className="text-[7px] font-mono text-rose-400 uppercase font-bold tracking-widest">{device.ip}</span>}
+                                        <div className="mt-1 flex flex-col items-center bg-black/80 px-4 py-2 rounded-xl border border-white/20 shadow-lg group-hover/node:border-cyan-400/30 transition-colors">
+                                            <span className={`${isSubDevice ? 'text-xs' : 'text-sm'} font-mono text-white tracking-wide font-bold whitespace-nowrap group-hover/node:text-cyan-300`}>{device.name}</span>
+                                            {(isEsp32 || isRaspberry) && <span className="text-[11px] font-mono font-bold text-emerald-400/70 uppercase tracking-widest">{device.ip}</span>}
+                                            {isThreat && !isEsp32 && !isRaspberry && <span className="text-[11px] font-mono font-bold text-rose-400 uppercase font-bold tracking-widest">{device.ip}</span>}
                                         </div>
                                     </motion.div>
                                 );
@@ -484,9 +499,9 @@ export default function NetworkPage() {
                             <span className="text-cyan-400">{icons.terminal}</span>
                             <span className="text-white font-mono text-xs font-bold tracking-[0.15em]">SYS_CONSOLE</span>
                             <div className="ml-auto flex gap-2">
-                                <div className="w-2 h-2 rounded-full bg-rose-500"></div>
-                                <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                <div className="w-3 h-3 rounded-full bg-rose-500"></div>
+                                <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                                <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
                             </div>
                         </div>
                         <div className="flex-1 overflow-auto pr-2 custom-scrollbar font-mono text-[11px] leading-relaxed flex flex-col gap-1.5">

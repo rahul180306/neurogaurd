@@ -25,7 +25,7 @@ export function Navbar() {
             <div className="absolute top-6 left-2 z-50 flex items-center gap-2">
                 <Image
                     src="/nglogo.png"
-                    alt="NeuroGaurd Logo"
+                    alt="NeuroGuard Logo"
                     width={72}
                     height={72}
                     className="object-contain"
@@ -33,7 +33,7 @@ export function Navbar() {
                 />
                 <h1 className="text-4xl tracking-wide -ml-3 pointer-events-none select-none">
                     <span className="font-semibold text-white">Neuro</span>
-                    <span className="font-light text-gray-400">Gaurd</span>
+                    <span className="font-light text-gray-400">Guard</span>
                 </h1>
             </div>
 

@@ -172,7 +172,7 @@ export default function VoiceAgent() {
             };
 
             recognitionRef.current.onerror = (event) => {
-                if (event.error === 'no-speech') return; // Ignore timeouts
+                if (event.error === 'no-speech' || event.error === 'network' || event.error === 'aborted') return; // Ignore transient errors
 
                 console.error("Speech Recognition Error", event.error);
                 setIsListening(false);

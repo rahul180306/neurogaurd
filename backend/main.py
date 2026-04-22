@@ -427,89 +427,9 @@ async def _process_telemetry_pipeline(data: Dict[str, Any]) -> Dict[str, Any]:
     return await process_telemetry(data)
 
 
-async def _ensure_simulated_monitorable_device(device_id: str, timestamp: str) -> Dict[str, Any]:
-    source_collection, existing_device = await find_device_record(device_id=device_id)
-    if existing_device:
-        normalized_existing = normalize_device_document(existing_device, source_collection)
-        if is_monitorable_device(normalized_existing):
-            return normalized_existing
-
-        connected_device = build_connected_device(
-            normalized_existing,
-            timestamp,
-            name=normalized_existing.get("name") or "Lobby Camera 01",
-            device_type=normalized_existing.get("type") or "camera",
-            trusted=normalized_existing.get("trusted", False),
-            auto_connect=normalized_existing.get("auto_connect", False),
-            existing=normalized_existing,
-        )
-        await db.devices.update_one({"device_id": connected_device["device_id"]}, {"$set": connected_device}, upsert=True)
-        return connected_device
-
-    simulated_device = build_connected_device(
-        {
-            "device_id": device_id,
-            "ip": "192.168.1.45",
-            "mac": "AA:BB:CC:DD:EE:45",
-            "hostname": "lobby-camera-01",
-            "vendor": "Demo Camera",
-            "type_guess": "camera",
-        },
-        timestamp,
-        name="Lobby Camera 01",
-        device_type="camera",
-        trusted=False,
-        auto_connect=False,
-    )
-    await db.devices.update_one({"device_id": simulated_device["device_id"]}, {"$set": simulated_device}, upsert=True)
-    return simulated_device
 
 
-# ─────────────────────────────────────────────────────────────────────
-# SIMULATION ENGINE — Background loop for hackathon demo
-# ─────────────────────────────────────────────────────────────────────
 
-SIMULATED_ATTACK_SCENARIOS = [
-    {"type": "port_scan", "severity": "High", "score": 8, "connections": 150, "network_usage": 45},
-    {"type": "ddos_attempt", "severity": "Critical", "score": 10, "connections": 350, "network_usage": 800},
-    {"type": "data_exfiltration", "severity": "Critical", "score": 9, "connections": 80, "network_usage": 650},
-    {"type": "brute_force", "severity": "High", "score": 8, "connections": 200, "network_usage": 30},
-    {"type": "malware_detected", "severity": "Critical", "score": 10, "connections": 90, "network_usage": 120},
-    {"type": "suspicious_activity", "severity": "Medium", "score": 5, "connections": 60, "network_usage": 25},
-    {"type": "port_scan", "severity": "Medium", "score": 6, "connections": 130, "network_usage": 15},
-    {"type": "brute_force", "severity": "High", "score": 7, "connections": 180, "network_usage": 40},
-    {"type": "data_exfiltration", "severity": "High", "score": 8, "connections": 110, "network_usage": 550},
-    {"type": "iot_botnet", "severity": "Critical", "score": 10, "connections": 250, "network_usage": 180},
-    {"type": "firmware_exploit", "severity": "High", "score": 9, "connections": 45, "network_usage": 400},
-]
-
-SIMULATED_SOURCE_IPS = [
-    ("185.220.101.35", 44.4268, 26.1025),
-    ("45.33.32.156", 55.7558, 37.6173),
-    ("114.114.114.114", 39.9042, 116.4074),
-    ("191.96.249.12", -23.5505, -46.6333),
-    ("103.224.182.250", 1.3521, 103.8198),
-    ("78.46.91.171", 52.5200, 13.4050),
-    ("185.203.118.22", 48.8566, 2.3522),
-    ("209.141.38.22", 36.1699, -115.1398),
-]
-
-SIMULATED_DEVICE_TEMPLATES = [
-    {"prefix": "cam", "type": "camera", "name_prefix": "Security Camera", "ip_range": (40, 60)},
-    {"prefix": "sensor", "type": "sensor", "name_prefix": "Temp Sensor", "ip_range": (61, 80)},
-    {"prefix": "esp", "type": "esp32", "name_prefix": "ESP32 Module", "ip_range": (81, 100)},
-    {"prefix": "rpi", "type": "raspberry", "name_prefix": "Raspberry Pi", "ip_range": (101, 120)},
-    {"prefix": "lock", "type": "sensor", "name_prefix": "Smart Lock", "ip_range": (121, 140)},
-    {"prefix": "thermo", "type": "sensor", "name_prefix": "Thermostat", "ip_range": (141, 160)},
-]
-
-DEMO_ATTACK_MAP = {
-    "ddos": {"type": "ddos_attempt", "severity": "Critical", "score": 10, "connections": 350, "network_usage": 800},
-    "iot_botnet": {"type": "iot_botnet", "severity": "Critical", "score": 10, "connections": 250, "network_usage": 180},
-    "firmware": {"type": "firmware_exploit", "severity": "High", "score": 9, "connections": 45, "network_usage": 400},
-    "malware": {"type": "malware_detected", "severity": "Critical", "score": 10, "connections": 90, "network_usage": 120},
-    "scan": {"type": "port_scan", "severity": "High", "score": 8, "connections": 150, "network_usage": 45},
-}
 
 
 async def _auto_respond_to_threat(threat: dict, source_ip: str, timestamp: str):
@@ -557,74 +477,7 @@ async def _auto_respond_to_threat(threat: dict, source_ip: str, timestamp: str):
             print(f"Voice alert error: {e}")
 
 
-async def _simulation_loop():
-    """Background simulation loop for hackathon demo. Generates realistic SOC events."""
-    await asyncio.sleep(5)
-    cycle = 0
-    while True:
-        try:
-            timestamp = datetime.utcnow().isoformat()
-            cycle += 1
 
-            connected_devices = await db.devices.find(
-                {"connected": True, "monitor": True, "blocked": {"$ne": True}}
-            ).to_list(50)
-
-            if connected_devices:
-                target_device = random.choice(connected_devices)
-                device_id = target_device.get("device_id")
-                scenario = random.choice(SIMULATED_ATTACK_SCENARIOS)
-                source_ip, lat, lng = random.choice(SIMULATED_SOURCE_IPS)
-
-                telemetry = {
-                    "device_id": device_id,
-                    "source_ip": source_ip,
-                    "sourceIp": source_ip,
-                    "connections": scenario["connections"] + random.randint(-20, 20),
-                    "network_usage": scenario["network_usage"] + random.randint(-10, 10),
-                    "timestamp": timestamp,
-                    "lat": lat,
-                    "lng": lng,
-                }
-
-                result = await _process_telemetry_pipeline(telemetry)
-
-                # Update device heartbeat
-                await db.devices.update_one(
-                    {"device_id": device_id},
-                    {"$set": {"last_seen": timestamp, "online": True}},
-                )
-
-                if result.get("threat_detected") and result.get("threat"):
-                    await _auto_respond_to_threat(result["threat"], source_ip, timestamp)
-                    # Reduce device health on threat detection
-                    await db.devices.update_one(
-                        {"device_id": device_id, "health": {"$gt": 0}},
-                        {"$inc": {"health": -10}},
-                    )
-
-            # Disable simulated device discovery to only use real nmap/arp devices
-            # Every 5th cycle: auto-generate a report
-            if cycle % 5 == 0:
-                try:
-                    await generate_full_report("Weekly")
-                except Exception as e:
-                    print(f"Auto-report generation failed: {e}")
-
-        except Exception as e:
-            print(f"Simulation loop error: {e}")
-
-        # Mark stale devices offline (not seen in 60s)
-        try:
-            cutoff = (datetime.utcnow() - timedelta(seconds=60)).isoformat()
-            await db.devices.update_many(
-                {"last_seen": {"$lt": cutoff}, "online": True},
-                {"$set": {"online": False}},
-            )
-        except Exception:
-            pass
-
-        await asyncio.sleep(12)
 
 
 @app.on_event("startup")
@@ -648,7 +501,6 @@ async def startup_event():
 
     monitor.start()
     asyncio.create_task(scanner.start())
-    asyncio.create_task(_simulation_loop())
 
 # Setup CORS for frontend communication
 app.add_middleware(
@@ -658,6 +510,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class ThreatDetectionRequest(BaseModel):
+    source_ip: str
+    target_device: str
+    attack_type: str
+    severity: str
+    description: str
+    threat_score: int
+
+@app.post("/api/threats/detect")
+async def detect_threat(req: ThreatDetectionRequest):
+    threat_doc = req.model_dump()
+    threat_doc["timestamp"] = datetime.utcnow().isoformat()
+    threat_doc["status"] = "Active"
+    
+    # Store directly in DB Collections to be picked up by frontend
+    if db is not None:
+        await db.threats.insert_one(threat_doc)
+        
+        # Dispatch alert using agent pipelines
+        try:
+            from agent.timeline_engine import record_event
+            await record_event("THREAT_DETECTED", req.description, req.severity, req.target_device)
+        except Exception as e:
+            print("Event record failed:", e)
+            
+    return {"status": "success"}
 
 class CommandRequest(BaseModel):
     command: str
@@ -687,10 +566,6 @@ class DeviceBlockRequest(BaseModel):
     reason: Optional[str] = None
 
 
-class DemoAttackRequest(BaseModel):
-    type: str
-
-
 class DeviceTelemetryRequest(BaseModel):
     device_id: str
     ip: str
@@ -698,6 +573,9 @@ class DeviceTelemetryRequest(BaseModel):
     bytes: int = 0
     protocol: str = "TCP"
     timestamp: Optional[str] = None
+    sensors: Optional[dict] = None  # e.g. {"humidity": 65.2, "temperature": 24.5}
+    actuators: Optional[dict] = None  # e.g. {"servo": {"angle": 90, "active": true}}
+    peripherals: Optional[list] = None  # e.g. [{"type": "servo", "name": "Servo Motor"}, ...]
 
 @app.get("/")
 def read_root():
@@ -948,6 +826,37 @@ async def receive_device_telemetry(req: DeviceTelemetryRequest):
         {"device_id": req.device_id},
         {"$set": {"last_seen": timestamp, "online": True}},
     )
+
+    # Upsert sensor/actuator data on the device document
+    sensor_update = {}
+    if req.sensors:
+        sensor_update["sensors"] = req.sensors
+    if req.actuators:
+        sensor_update["actuators"] = req.actuators
+    if sensor_update:
+        await db.devices.update_one(
+            {"device_id": req.device_id},
+            {"$set": sensor_update},
+        )
+
+    # Register peripherals as sub-devices in device_peripherals collection
+    if req.peripherals:
+        for p in req.peripherals:
+            peripheral_id = f"{req.device_id}_{p.get('type', 'unknown').replace(' ', '_')}"
+            await db.device_peripherals.update_one(
+                {"peripheral_id": peripheral_id},
+                {"$set": {
+                    "peripheral_id": peripheral_id,
+                    "parent_device_id": req.device_id,
+                    "parent_ip": req.ip,
+                    "type": p.get("type", "unknown"),
+                    "name": p.get("name", p.get("type", "Peripheral")),
+                    "active": True,
+                    "last_seen": timestamp,
+                    "data": p.get("data", {}),
+                }},
+                upsert=True,
+            )
 
     # Run through telemetry pipeline
     telemetry_data = {
@@ -1432,99 +1341,6 @@ async def get_timeline_events(limit: int = Query(50, ge=1, le=200), event_type: 
     return await get_events(limit=limit, event_type=event_type)
 
 
-@app.post("/api/demo/attack")
-async def demo_attack(req: DemoAttackRequest):
-    """Trigger a demo attack scenario for hackathon presentation."""
-    scenario = DEMO_ATTACK_MAP.get(req.type)
-    if not scenario:
-        return {"status": "error", "message": f"Unknown attack type: {req.type}. Use: {list(DEMO_ATTACK_MAP.keys())}"}
-
-    timestamp = datetime.utcnow().isoformat()
-    source_ip, lat, lng = random.choice(SIMULATED_SOURCE_IPS)
-
-    connected_devices = await db.devices.find(
-        {"connected": True, "monitor": True, "blocked": {"$ne": True}}
-    ).to_list(50)
-
-    if not connected_devices:
-        return {"status": "error", "message": "No connected devices available for demo"}
-
-    target_device = random.choice(connected_devices)
-    device_id = target_device.get("device_id")
-
-    await _ensure_simulated_monitorable_device(device_id, timestamp)
-
-    telemetry = {
-        "device_id": device_id,
-        "source_ip": source_ip,
-        "sourceIp": source_ip,
-        "connections": scenario["connections"] + random.randint(-20, 20),
-        "network_usage": scenario["network_usage"] + random.randint(-10, 10),
-        "timestamp": timestamp,
-        "lat": lat,
-        "lng": lng,
-    }
-
-    result = await _process_telemetry_pipeline(telemetry)
-
-    response = {"status": "executed", "attack_type": req.type, "device_id": device_id}
-
-    if result.get("threat_detected") and result.get("threat"):
-        await _auto_respond_to_threat(result["threat"], source_ip, timestamp)
-        response["threat"] = True
-        response["severity"] = result["threat"].get("severity")
-
-    return response
-
-
-@app.post("/api/simulate-threat")
-async def simulate_threat_event():
-    """
-    Bypasses the human Voice Agent and injects raw telemetry directly into the AI Core.
-    This triggers the Autonomous Investigation and Defense protocol.
-    With live MongoDB integration, we actually insert the threat here to trigger WebSockets.
-    Also triggers the AI Prediction Engine.
-    """
-    timestamp = datetime.utcnow().isoformat()
-    mock_ip = "185.203.118.22"
-
-    await _ensure_simulated_monitorable_device("camera_01", timestamp)
-    
-    mock_telemetry_event = {
-        "device_id": "camera_01",
-        "source_ip": mock_ip,
-        "connections": 150,
-        "network_usage": 200,
-        "activity_type": "suspicious network scanning detected",
-        "monitored_ports": [22, 80, 443],
-        "lat": 55.7558,
-        "lng": 37.6173,
-        "timestamp": timestamp
-    }
-
-    pipeline_result = await _process_telemetry_pipeline(mock_telemetry_event)
-    prediction = pipeline_result.get("prediction")
-    
-    # Process the threat through the AI SOC Agent
-    ai_payload = {
-        "source_ip": mock_ip,
-        "activity_type": "suspicious network scanning detected",
-        "connection_rate": "150 connections in 5 seconds",
-        "monitored_ports": [22, 80, 443]
-    }
-    response = process_command(event_data=ai_payload)
-    
-    if prediction:
-        response["prediction"] = {
-            "device": prediction.get("device_id"),
-            "attack": prediction.get("predicted_attack"),
-            "confidence": prediction.get("confidence")
-        }
-
-    if pipeline_result.get("threat"):
-        response["threat_detected"] = True
-    
-    return response
 
 @app.post("/api/clear-history")
 async def clear_history():
@@ -1555,35 +1371,6 @@ async def clear_history():
         }
     }
 
-@app.post("/api/simulate-coordinated-attack")
-async def simulate_coordinated_attack():
-    """
-    Simulates a highly complex multi-vector attack designed to trigger 
-    the Threat Intelligence Correlation feature.
-    """
-    timestamp = datetime.utcnow().isoformat()
-    
-    for attack in ["port_scan", "login_brute_force", "device_beaconing"]:
-        await db.threats.insert_one({
-            "source_ip": "114.114.114.114",
-            "attack_type": attack,
-            "device": "router_01",
-            "lat": 39.9042,
-            "lng": 116.4074, 
-            "threat_score": 9,
-            "timestamp": timestamp
-        })
-
-    multi_vector_event = {
-        "dashboard_alerts": [
-            "User account lockouts exceeded threshold on active directory",
-            "Unrecognized workstation connected to internal switch port",
-            "Unexpected high bandwidth usage off-hours"
-        ]
-    }
-    
-    response = process_command(event_data=multi_vector_event)
-    return response
 
 @app.get("/api/analytics")
 async def get_analytics():

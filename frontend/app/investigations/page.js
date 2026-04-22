@@ -25,17 +25,25 @@ export default function Investigations() {
     const [investigations, setInvestigations] = useState([]);
     const [selectedCaseIndex, setSelectedCaseIndex] = useState(0);
     const [hexLines, setHexLines] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
     
-    // Fetch investigations from backend
+    // Fetch investigations from backend AI builder
     useEffect(() => {
         const fetchInvestigations = async () => {
             try {
-                const data = await fetchApiJson("/api/investigations?limit=20");
-                if (Array.isArray(data) && data.length > 0) {
-                    setInvestigations(data);
+                // Fetch perfectly formatted, AWS Bedrock AI generated Investigation Data based on Threats
+                const res = await fetch("/api/ai/investigations");
+                if (!res.ok) throw new Error("Failed");
+                const aiCases = await res.json();
+                if (Array.isArray(aiCases) && aiCases.length > 0) {
+                    setInvestigations(aiCases);
+                } else if (aiCases && aiCases.error) {
+                    console.warn("AI returned error:", aiCases.error);
                 }
             } catch (error) {
-                console.error("Failed to fetch investigations:", error);
+                console.error("Failed to fetch AI investigations:", error);
+            } finally {
+                setIsLoading(false);
             }
         };
         
@@ -58,20 +66,31 @@ export default function Investigations() {
     const containerV = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } };
     const itemV = { hidden: { opacity: 0, scale: 0.98 }, show: { opacity: 1, scale: 1, transition: { type: "spring", stiffness: 300, damping: 26 } } };
 
-    // Show loading state if no investigations yet
-    if (investigations.length === 0) {
+    // Show loading state
+    if (isLoading) {
         return (
             <div className="min-h-screen w-full bg-[#050510] text-white flex items-center justify-center">
                 <div className="text-center">
                     <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                     <p className="text-white/50 font-mono text-sm">Loading investigations...</p>
-                    <p className="text-white/30 font-mono text-xs mt-2">Waiting for threat detection to generate cases</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (investigations.length === 0) {
+        return (
+            <div className="min-h-screen w-full bg-[#050510] text-white flex items-center justify-center">
+                <div className="text-center bg-black/40 border border-violet-500/20 p-8 rounded-lg">
+                    <h2 className="text-xl font-bold text-violet-400 mb-2">No Active Investigations</h2>
+                    <p className="text-white/50 font-mono text-sm">Systems are monitoring normally.</p>
+                    <p className="text-white/30 font-mono text-xs mt-2">Any future threats will automatically auto-generate cases here.</p>
                 </div>
             </div>
         );
     }
     
-    const activeCase = investigations[selectedCaseIndex];
+    const activeCase = investigations[selectedCaseIndex] || investigations[0];
 
     return (
         <div className="min-h-screen w-full bg-[#050510] text-white relative overflow-x-hidden pt-28 pb-16 px-4 md:px-8 xl:px-12 flex justify-center font-sans tracking-wide">
@@ -257,20 +276,152 @@ export default function Investigations() {
                     </motion.div>
                 </div>
 
-                <motion.div variants={itemV} className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-8">
-                    {[
-                        { label: "Block Target IPs", desc: "FW_rule drop 0.0.0.0", color: "rose", bg: "bg-rose-500/10", border: "border-rose-500/50" },
-                        { label: "Isolate Subnet", desc: "VLAN quarantine 192.x", color: "orange", bg: "bg-orange-500/10", border: "border-orange-500/50" },
-                        { label: "Trigger Forensic", desc: "Start memory dump", color: "fuchsia", bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/50" },
-                        { label: "Rotate Keys", desc: "Expire all API tokens", color: "emerald", bg: "bg-emerald-500/10", border: "border-emerald-500/50" },
-                    ].map((btn, i) => (
-                        <button key={i} className={`${btn.bg} border ${btn.border} p-4 flex flex-col gap-2 items-start relative group overflow-hidden transition-all hover:bg-${btn.color}-500 hover:scale-[1.02]`}>
-                            <div className={`absolute right-[-10%] top-[-10%] w-[50px] h-[50px] bg-${btn.color}-500 blur-xl opacity-20 group-hover:opacity-0 transition-opacity`}></div>
-                            <span className={`text-[9px] font-mono uppercase tracking-widest text-${btn.color}-400 group-hover:text-black font-bold`}>[EXECUTE_COMMAND]</span>
-                            <span className="text-white text-sm font-black tracking-tight group-hover:text-black uppercase">{btn.label}</span>
-                            <span className="text-white/40 text-[10px] font-mono group-hover:text-black/60">{btn.desc}</span>
-                        </button>
-                    ))}
+                <motion.div variants={itemV} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* AI DEEP ANALYSIS */}
+                    <div className="border border-white/10 bg-black/40 p-5 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 text-[80px] text-violet-500/5 rotate-12 -mt-2 mr-2 pointer-events-none font-black">AI</div>
+                        <div className="flex items-center gap-2 mb-4">
+                            {icons.cpu}
+                            <span className="text-white font-mono text-xs font-bold tracking-[0.15em] uppercase">Bedrock_AI_Analysis</span>
+                            <span className="ml-auto text-[9px] font-mono uppercase text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2 py-0.5">Claude Powered</span>
+                        </div>
+                        <div className="bg-[#111] border border-white/10 p-4 font-mono text-[11px] flex flex-col gap-2 rounded-md max-h-[200px] overflow-y-auto custom-scrollbar">
+                            <div className="flex gap-2 text-white/30 mb-1 border-b border-white/10 pb-2">
+                                <span className="text-violet-500">▶</span><span>ANALYSIS_OUTPUT</span>
+                            </div>
+                            <p className="text-white/70 leading-relaxed whitespace-pre-wrap">{activeCase.aiAnalysis?.reasoning || "AI analysis pending..."}</p>
+                        </div>
+                    </div>
+
+                    {/* HACKER PROFILE */}
+                    <div className="border border-white/10 bg-black/40 p-5 relative overflow-hidden">
+                        <div className="flex items-center gap-2 mb-4">
+                            {icons.shield}
+                            <span className="text-white font-mono text-xs font-bold tracking-[0.15em] uppercase">Hacker_Profile</span>
+                        </div>
+                        <div className="flex flex-col gap-3">
+                            <div className="flex items-center gap-3 p-3 bg-white/[0.02] border-l-2 border-rose-500">
+                                <span className="text-[10px] font-mono text-white/40 uppercase w-28 shrink-0">Est_Location</span>
+                                <span className="text-rose-300 text-sm font-bold">{activeCase.hackerProfile?.estimatedLocation || activeCase.evidence?.suspiciousIPs?.[0]?.origin || "Analyzing..."}</span>
+                            </div>
+                            <div className="flex items-center gap-3 p-3 bg-white/[0.02] border-l-2 border-orange-500">
+                                <span className="text-[10px] font-mono text-white/40 uppercase w-28 shrink-0">Attack_Pattern</span>
+                                <span className="text-orange-300 text-sm font-semibold">{activeCase.hackerProfile?.attackPattern || "Unknown"}</span>
+                            </div>
+                            <div className="flex items-center gap-3 p-3 bg-white/[0.02] border-l-2 border-fuchsia-500">
+                                <span className="text-[10px] font-mono text-white/40 uppercase w-28 shrink-0">Risk_Level</span>
+                                <span className="text-fuchsia-300 text-sm font-black uppercase">{activeCase.hackerProfile?.riskLevel || activeCase.severity || "Unknown"}</span>
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+
+                {/* ATTACK TECHNIQUE + BLOCKED IPS */}
+                <motion.div variants={itemV} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* ATTACK TECHNIQUE (MITRE ATT&CK) */}
+                    <div className="border border-white/10 bg-black/40 p-5 relative overflow-hidden">
+                        <div className="flex items-center gap-2 mb-4">
+                            {icons.network}
+                            <span className="text-white font-mono text-xs font-bold tracking-[0.15em] uppercase">Attack_Technique</span>
+                            {activeCase.attackTechnique?.mitreId && (
+                                <span className="ml-auto text-[9px] font-mono uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5">
+                                    MITRE {activeCase.attackTechnique.mitreId}
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex flex-col gap-3">
+                            <div className="border-l-2 border-cyan-500 pl-3">
+                                <h4 className="text-cyan-300 text-sm font-bold">{activeCase.attackTechnique?.name || "Analyzing..."}</h4>
+                                <p className="text-white/50 text-xs mt-1 leading-relaxed">{activeCase.attackTechnique?.description || "Technique classification in progress."}</p>
+                            </div>
+                            {activeCase.attackTechnique?.prevention?.length > 0 && (
+                                <div className="mt-2">
+                                    <span className="text-[9px] font-mono uppercase text-emerald-400/70 tracking-widest">Prevention_Measures</span>
+                                    <div className="flex flex-col gap-1.5 mt-2">
+                                        {activeCase.attackTechnique.prevention.map((step, i) => (
+                                            <div key={i} className="flex items-start gap-2 text-xs text-white/60">
+                                                <span className="text-emerald-400 mt-0.5 shrink-0">&#x2713;</span>
+                                                <span>{step}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* BLOCKED IPs */}
+                    <div className="border border-white/10 bg-black/40 p-5 relative overflow-hidden">
+                        <div className="flex items-center gap-2 mb-4">
+                            {icons.shield}
+                            <span className="text-white font-mono text-xs font-bold tracking-[0.15em] uppercase">Blocked_IPs</span>
+                            <span className="ml-auto text-[9px] font-mono uppercase text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5">
+                                {(activeCase.blockedIPs || []).length > 0 ? "ENFORCED" : "MONITORING"}
+                            </span>
+                        </div>
+                        {(activeCase.blockedIPs || []).length === 0 ? (
+                            <div className="text-white/40 text-sm font-mono py-4">No IPs blocked for this case yet.</div>
+                        ) : (
+                            <div className="flex flex-col gap-3">
+                                {activeCase.blockedIPs.map((entry, i) => (
+                                    <div key={i} className="bg-rose-500/5 border border-rose-500/20 p-3 flex flex-col gap-1">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-rose-400 font-mono text-sm font-bold">{entry.ip}</span>
+                                            <span className="text-[9px] font-mono text-white/30">{entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ""}</span>
+                                        </div>
+                                        <span className="text-white/50 text-[10px] font-mono">{entry.reason}</span>
+                                        {entry.technique && (
+                                            <span className="text-amber-400/70 text-[9px] font-mono uppercase">Technique: {entry.technique}</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Evidence Anomalies */}
+                        {(activeCase.evidence?.anomalies || []).length > 0 && (
+                            <div className="mt-4 pt-3 border-t border-white/10">
+                                <span className="text-[9px] font-mono uppercase text-amber-400/70 tracking-widest">Network_Anomalies</span>
+                                <div className="flex flex-col gap-1.5 mt-2">
+                                    {activeCase.evidence.anomalies.map((anomaly, i) => (
+                                        <div key={i} className="flex items-start gap-2 text-xs text-amber-300/70">
+                                            <span className="text-amber-500 mt-0.5 shrink-0">!</span>
+                                            <span>{anomaly}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </motion.div>
+
+                {/* DATA-DRIVEN MITIGATION ACTIONS */}
+                <motion.div variants={itemV} className="pb-8">
+                    <div className="flex items-center gap-2 mb-3">
+                        <span className="text-white/40 font-mono text-[10px] uppercase tracking-widest">Recommended_Mitigations</span>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {(activeCase.aiAnalysis?.mitigations && activeCase.aiAnalysis.mitigations.length > 0
+                            ? activeCase.aiAnalysis.mitigations
+                            : ["Block source IP at firewall", "Isolate affected subnet", "Conduct forensic imaging", "Review firmware patches"]
+                        ).map((mitigation, i) => {
+                            const colors = [
+                                { bg: "bg-rose-500/10", border: "border-rose-500/50", text: "text-rose-400" },
+                                { bg: "bg-orange-500/10", border: "border-orange-500/50", text: "text-orange-400" },
+                                { bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/50", text: "text-fuchsia-400" },
+                                { bg: "bg-cyan-500/10", border: "border-cyan-500/50", text: "text-cyan-400" },
+                                { bg: "bg-emerald-500/10", border: "border-emerald-500/50", text: "text-emerald-400" },
+                                { bg: "bg-amber-500/10", border: "border-amber-500/50", text: "text-amber-400" },
+                            ];
+                            const c = colors[i % colors.length];
+                            return (
+                                <div key={i} className={`${c.bg} border ${c.border} p-4 flex flex-col gap-2 items-start relative overflow-hidden`}>
+                                    <span className={`text-[9px] font-mono uppercase tracking-widest ${c.text} font-bold`}>[MITIGATION_{String(i + 1).padStart(2, '0')}]</span>
+                                    <span className="text-white/80 text-xs font-semibold leading-relaxed">{mitigation}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </motion.div>
             </motion.div>
         </div>
